@@ -122,82 +122,41 @@
     const ICON_COPY = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
     const ICON_STAR = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"></path></svg>`;
 
-    const RAW_DATA_URL = "https://raw.githubusercontent.com/SoliSpirit/mtproto/master/all_proxies.txt";
     const API_URL = "https://mtproto-ping.onrender.com/ping";
 
     let proxies = [];
     let favorites = JSON.parse(localStorage.getItem('userFavs') || '[]');
 
-    function parseProxies(text) {
-        const lines = text.split('\n');
-        const result = [];
-        lines.forEach(line => {
-            const trimmed = line.trim();
-            if (!trimmed.includes('server=') || !trimmed.includes('port=')) return;
-            
-            try {
-                const searchStr = trimmed.includes('?') ? trimmed.split('?')[1] : trimmed;
-                const params = new URLSearchParams(searchStr);
-                
-                const srv = params.get('server');
-                const prt = parseInt(params.get('port'));
-                
-                // Проверяем, что порт реальный (0-65535)
-                if (srv && prt > 0 && prt <= 65535) {
-                    result.push({
-                        host: srv,
-                        port: prt,
-                        secret: params.get('secret') || '',
-                        full: trimmed.startsWith('tg://') ? trimmed : `tg://proxy?${searchStr}`
-                    });
-                }
-            } catch (e) { }
-        });
-        // Сортируем по случайному признаку и берем 50, чтобы список всегда был разным
-        return result.sort(() => 0.5 - Math.random()).slice(0, 50);
-    }
-
     async function load() {
         const refreshIcon = document.getElementById('refreshSvg');
         const statusNote = document.getElementById('statusNote');
-        const mainList = document.getElementById('mainList');
         
         if (refreshIcon.classList.contains('rotating')) return;
 
+        // 1. Случайная задержка (Jitter) до 2 секунд для распределения нагрузки
+        await new Promise(r => setTimeout(r, Math.random() * 2000));
+
         refreshIcon.classList.add('rotating');
-        statusNote.innerText = "Загрузка списка...";
+        statusNote.innerText = "Получение данных...";
 
         try {
-            const response = await fetch(RAW_DATA_URL + '?nocache=' + Date.now());
-            const text = await response.text();
-            const parsed = parseProxies(text);
+            // 2. Теперь мы просто запрашиваем данные у сервера (он сам кэширует список)
+            const response = await fetch(API_URL);
+            if (!response.ok) throw new Error("Сервер занят");
 
-            if (parsed.length === 0) throw new Error("Список прокси пуст");
+            proxies = await response.json();
 
-            statusNote.innerText = `Проверка ${parsed.length} серверов...`;
-
-            const pingRes = await fetch(API_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ proxies: parsed })
-            });
-
-            if (!pingRes.ok) throw new Error("Ошибка API (Render)");
-
-            proxies = await pingRes.json();
-            
-            // Сортируем: сначала живые, потом по пингу
+            // Сортировка и фильтрация уже сделана на бэкенде, но для верности:
             proxies.sort((a, b) => {
                 if (a.alive !== b.alive) return b.alive - a.alive;
                 return (a.ping || 9999) - (b.ping || 9999);
             });
 
-            statusNote.innerText = "Обновлено: " + new Date().toLocaleTimeString();
+            statusNote.innerText = `Обновлено: ${new Date().toLocaleTimeString()} (Найдено: ${proxies.length})`;
             render();
         } catch (e) {
+            statusNote.innerText = "Ошибка: Сервер обновляется, попробуйте через минуту";
             console.error(e);
-            statusNote.innerText = "Ошибка: " + e.message;
-            mainList.innerHTML = `<div style="text-align:center; padding:20px; color:var(--apple-red)">${e.message}</div>`;
         } finally {
             refreshIcon.classList.remove('rotating');
         }
@@ -233,7 +192,12 @@
         const favBox = document.getElementById('favoriteSection');
         if (favorites.length) {
             favBox.style.display = 'block';
-            document.getElementById('favoriteList').innerHTML = favorites.map(p => cardHtml(p)).join('');
+            // Обновляем пинги в избранном, если эти прокси есть в общем списке
+            const updatedFavs = favorites.map(fav => {
+                const live = proxies.find(p => p.full === fav.full);
+                return live ? { ...fav, alive: live.alive, ping: live.ping } : fav;
+            });
+            document.getElementById('favoriteList').innerHTML = updatedFavs.map(p => cardHtml(p)).join('');
         } else favBox.style.display = 'none';
 
         document.getElementById('mainList').innerHTML = proxies.map(p => cardHtml(p)).join('');
