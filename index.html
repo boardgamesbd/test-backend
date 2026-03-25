@@ -216,57 +216,36 @@
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
-    async function load() {
-        const btn = document.getElementById('refreshBtn');
-        const bar = document.getElementById('progress-line');
-        const note = document.getElementById('loadingNote');
-        const mainList = document.getElementById('mainList');
+   async function load() {
+    const btn = document.querySelector('.btn-refresh');
+    if (btn) btn.classList.add('loading');
 
-        if (btn.classList.contains('rotating')) return;
-        
-        btn.classList.add('rotating');
-        note.style.display = 'block';
-        bar.style.width = "30%"; // Начальная анимация загрузки
+    try {
+        // 1. Получаем список прокси из твоего внешнего источника
+        const response = await fetch(RAW_DATA_URL);
+        const text = await response.text();
+        const parsed = parseProxies(text);
 
-        try {
-            // 1. Получаем сырой список прокси из GitHub
-            const r = await fetch(RAW_DATA_URL + "?t=" + Date.now());
-            const text = await r.text();
-            const rawProxies = text.split('\n').filter(l => l.includes('proxy?')).map(line => {
-                const p = new URLSearchParams(line.split('?')[1]);
-                return { 
-                    host: p.get('server'), 
-                    port: p.get('port'), 
-                    secret: p.get('secret'),
-                    full: line.trim() 
-                };
-            });
+        // 2. Отправляем их на твой Render-бэкенд для пинга
+        const pingRes = await fetch("https://mtproto-ping.onrender.com/ping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ proxies: parsed })
+        });
 
-            bar.style.width = "60%";
+        if (!pingRes.ok) throw new Error("Ошибка бэкенда");
 
-            // 2. Отправляем их на бэкенд для проверки пинга
-            const response = await fetch(API_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ proxies: rawProxies })
-            });
+        // 3. Получаем результат и обновляем интерфейс
+        proxies = await pingRes.json();
+        render();
 
-            if (!response.ok) throw new Error("API Error");
-
-            // 3. Получаем результаты (alive и ping)
-            proxies = await response.json();
-            
-            bar.style.width = "100%";
-            render();
-
-        } catch (e) {
-            console.error(e);
-            mainList.innerHTML = "<p style='color:var(--apple-red); text-align:center;'>Ошибка связи с бэкендом</p>";
-        } finally {
-            btn.classList.remove('rotating');
-            setTimeout(() => { bar.style.width = "0%"; note.style.display = 'none'; }, 800);
-        }
+    } catch (e) {
+        console.error("Ошибка:", e);
+        alert("Не удалось обновить список серверов");
+    } finally {
+        if (btn) btn.classList.remove('loading');
     }
+}
 
     function cardHtml(p) {
         const isFav = favorites.some(f => f.full === p.full);
