@@ -133,25 +133,28 @@
         const result = [];
         lines.forEach(line => {
             const trimmed = line.trim();
-            // Более гибкая проверка: ищем наличие server и port в строке
             if (!trimmed.includes('server=') || !trimmed.includes('port=')) return;
             
             try {
-                // Пытаемся вытащить параметры даже если формат чуть "кривой"
                 const searchStr = trimmed.includes('?') ? trimmed.split('?')[1] : trimmed;
                 const params = new URLSearchParams(searchStr);
                 
-                if (params.get('server') && params.get('port')) {
+                const srv = params.get('server');
+                const prt = parseInt(params.get('port'));
+                
+                // Проверяем, что порт реальный (0-65535)
+                if (srv && prt > 0 && prt <= 65535) {
                     result.push({
-                        host: params.get('server'),
-                        port: params.get('port'),
+                        host: srv,
+                        port: prt,
                         secret: params.get('secret') || '',
                         full: trimmed.startsWith('tg://') ? trimmed : `tg://proxy?${searchStr}`
                     });
                 }
-            } catch (e) { console.warn("Skip line:", trimmed); }
+            } catch (e) { }
         });
-        return result.slice(0, 50); // Увеличил лимит до 50
+        // Сортируем по случайному признаку и берем 50, чтобы список всегда был разным
+        return result.sort(() => 0.5 - Math.random()).slice(0, 50);
     }
 
     async function load() {
